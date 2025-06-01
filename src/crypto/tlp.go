@@ -74,8 +74,8 @@ type Puzzle struct {
 // that callers _may_ re‑use N or its factors if they wish).  Most applications
 // will throw the private key away immediately.
 func GeneratePuzzle(t uint64) (Puzzle, *rsa.PrivateKey, error) {
-    bits := DefaultModulusBits
-    randR := rand.Reader
+	bits := DefaultModulusBits
+	randR := rand.Reader
 	if bits < 1024 {
 		return Puzzle{}, nil, errors.New("RSA modulus too small for security")
 	}
