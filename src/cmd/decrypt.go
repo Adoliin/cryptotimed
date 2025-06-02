@@ -4,9 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 
-	"cryptotimed/src/crypto"
+	"cryptotimed/src/operations"
 	"cryptotimed/src/utils"
 )
 
@@ -41,52 +40,25 @@ func DecryptCommand(args []string) error {
 		return fmt.Errorf("--input is required")
 	}
 
-	// Determine output file name
-	if *outputFile == "" {
-		if strings.HasSuffix(*inputFile, ".locked") {
-			*outputFile = strings.TrimSuffix(*inputFile, ".locked")
-		} else {
-			*outputFile = *inputFile + ".decrypted"
-		}
+	// Prepare options for the operation
+	opts := operations.DecryptOptions{
+		InputFile:  *inputFile,
+		KeyInput:   *keyInput,
+		OutputFile: *outputFile,
 	}
 
-	// Read encrypted file
+	// Display initial progress messages
 	fmt.Printf("Reading encrypted file: %s\n", *inputFile)
+
+	// Read encrypted file to get work factor for progress display
 	ef, err := utils.ReadEncryptedFile(*inputFile)
 	if err != nil {
 		return fmt.Errorf("failed to read encrypted file: %v", err)
 	}
 
-	// Check if key is required
-	if ef.KeyRequired == 1 && *keyInput == "" {
-		return fmt.Errorf("this file requires a key to decrypt (use --key)")
-	}
+	// Check if key is required and provide warning if needed
 	if ef.KeyRequired == 0 && *keyInput != "" {
 		fmt.Printf("Warning: key provided but file was encrypted without key (ignoring key)\n")
-		*keyInput = ""
-	}
-
-	// Parse key input
-	userKeyRaw, err := utils.ParseKeyInput(*keyInput)
-	if err != nil {
-		return fmt.Errorf("failed to parse key input: %v", err)
-	}
-
-	// Extract puzzle from encrypted file
-	puzzle := utils.PuzzleFromEncryptedFile(ef)
-
-	// If this file uses password-based G derivation, we need to derive G from the password
-	if ef.Version >= 2 && ef.KeyRequired == 1 {
-		if len(userKeyRaw) == 0 {
-			return fmt.Errorf("password required for this file")
-		}
-
-		// Derive G from password + salt using app-defined KDF parameters
-		derivedG, err := crypto.DeriveBaseFromPassword(userKeyRaw, ef.Salt, puzzle.KdfParams, puzzle.N)
-		if err != nil {
-			return fmt.Errorf("failed to derive puzzle base from password: %v", err)
-		}
-		puzzle.G = derivedG
 	}
 
 	fmt.Printf("Solving time-lock puzzle (%d sequential squarings)...\n", ef.WorkFactor)
@@ -94,34 +66,24 @@ func DecryptCommand(args []string) error {
 	// Create progress bar
 	progressBar := utils.NewProgressBar(ef.WorkFactor)
 
-	// Solve the puzzle with progress tracking
-	target := crypto.SolvePuzzle(puzzle, func(done uint64) {
+	// Perform the decryption operation with progress tracking
+	result, err := operations.DecryptFile(opts, func(done uint64) {
 		progressBar.Update(done)
 	})
+	if err != nil {
+		return err
+	}
+
 	progressBar.Finish()
 
+	// Display results
 	fmt.Printf("Puzzle solved!\n")
-
-	// Derive decryption key directly from puzzle target
-	decryptionKey := crypto.DerivePuzzleKey(target)
-
-	// Decrypt the data directly
 	fmt.Printf("Decrypting data...\n")
-	plaintext, err := crypto.DecryptData(decryptionKey, ef.Data)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt data (wrong passphrase?): %v", err)
-	}
-
-	// Write decrypted file
-	fmt.Printf("Writing decrypted file: %s\n", *outputFile)
-	if err := utils.WriteFile(*outputFile, plaintext); err != nil {
-		return fmt.Errorf("failed to write decrypted file: %v", err)
-	}
-
+	fmt.Printf("Writing decrypted file: %s\n", result.OutputFile)
 	fmt.Printf("Decryption complete!\n")
-	fmt.Printf("Input file: %s\n", *inputFile)
-	fmt.Printf("Output file: %s (%d bytes)\n", *outputFile, len(plaintext))
-	fmt.Printf("Work factor: %d sequential squarings\n", ef.WorkFactor)
+	fmt.Printf("Input file: %s\n", result.InputFile)
+	fmt.Printf("Output file: %s (%d bytes)\n", result.OutputFile, result.PlaintextSize)
+	fmt.Printf("Work factor: %d sequential squarings\n", result.WorkFactor)
 
 	return nil
 }

@@ -3,11 +3,10 @@ package cmd
 import (
 	"flag"
 	"fmt"
-	"math/big"
 	"os"
 	"time"
 
-	"cryptotimed/src/crypto"
+	"cryptotimed/src/operations"
 	"cryptotimed/src/utils"
 )
 
@@ -34,81 +33,46 @@ func BenchmarkCommand(args []string) error {
 		return err
 	}
 
+	// Prepare options for the operation
+	opts := operations.BenchmarkOptions{
+		Duration: *duration,
+		Samples:  *samples,
+	}
+
+	// Display initial progress messages
 	fmt.Printf("Benchmarking modular squaring performance...\n")
 	fmt.Printf("Duration per sample: %v\n", *duration)
 	fmt.Printf("Number of samples: %d\n\n", *samples)
 
-	// Generate a test puzzle to get realistic RSA modulus (no password for benchmark)
-	testPuzzle, _, err := crypto.GeneratePuzzle(1, nil)
+	// Perform the benchmark operation
+	result, err := operations.RunBenchmark(opts)
 	if err != nil {
-		return fmt.Errorf("failed to generate test puzzle: %v", err)
+		return err
 	}
 
-	var totalOps uint64
-	var totalTime time.Duration
-
-	for sample := 1; sample <= *samples; sample++ {
-		fmt.Printf("Running sample %d/%d...\n", sample, *samples)
-
-		ops, elapsed := benchmarkSquaring(testPuzzle.N, *duration)
-		opsPerSecond := float64(ops) / elapsed.Seconds()
-
-		fmt.Printf("  Operations: %d\n", ops)
-		fmt.Printf("  Time: %v\n", elapsed)
-		fmt.Printf("  Rate: %.0f ops/sec\n\n", opsPerSecond)
-
-		totalOps += ops
-		totalTime += elapsed
+	// Display sample results
+	for i, sample := range result.Samples {
+		fmt.Printf("Running sample %d/%d...\n", i+1, *samples)
+		fmt.Printf("  Operations: %d\n", sample.Operations)
+		fmt.Printf("  Time: %v\n", sample.Elapsed)
+		fmt.Printf("  Rate: %.0f ops/sec\n\n", sample.OpsPerSecond)
 	}
 
-	// Calculate average performance
-	avgOpsPerSecond := float64(totalOps) / totalTime.Seconds()
-
+	// Display overall results
 	fmt.Printf("=== Benchmark Results ===\n")
-	fmt.Printf("Average rate: %.0f squarings/second\n", avgOpsPerSecond)
-	fmt.Printf("Total operations: %d\n", totalOps)
-	fmt.Printf("Total time: %v\n\n", totalTime)
+	fmt.Printf("Average rate: %.0f squarings/second\n", result.AvgOpsPerSecond)
+	fmt.Printf("Total operations: %d\n", result.TotalOps)
+	fmt.Printf("Total time: %v\n\n", result.TotalTime)
 
-	// Provide time estimates for common work factors
+	// Display time estimates
 	fmt.Printf("=== Time Estimates ===\n")
-	workFactors := []uint64{
-		1000000,     // ~1 second
-		60000000,    // ~1 minute
-		3600000000,  // ~1 hour
-		86400000000, // ~1 day
-	}
-
-	for _, wf := range workFactors {
-		estimatedTime := utils.EstimateTime(wf, avgOpsPerSecond)
-		fmt.Printf("Work factor %d: %s\n", wf, utils.FormatDuration(estimatedTime))
+	for _, estimate := range result.TimeEstimates {
+		fmt.Printf("Work factor %d: %s\n", estimate.WorkFactor, utils.FormatDuration(estimate.EstimatedTime))
 	}
 
 	fmt.Printf("\nTo encrypt with a specific delay, use:\n")
 	fmt.Printf("  cryptotimed encrypt --input file.txt --work ITERATIONS\n")
-	fmt.Printf("\nWhere ITERATIONS = desired_seconds × %.0f\n", avgOpsPerSecond)
+	fmt.Printf("\nWhere ITERATIONS = desired_seconds × %.0f\n", result.AvgOpsPerSecond)
 
 	return nil
-}
-
-// benchmarkSquaring performs modular squaring operations for the specified duration
-// and returns the number of operations performed and actual elapsed time
-func benchmarkSquaring(N *big.Int, duration time.Duration) (uint64, time.Duration) {
-	// Start with a random value
-	x := big.NewInt(12345)
-	x.Mod(x, N)
-
-	var operations uint64
-	start := time.Now()
-	end := start.Add(duration)
-
-	for time.Now().Before(end) {
-		// Perform a batch of squaring operations to reduce time.Now() overhead
-		for i := 0; i < 1000; i++ {
-			x = crypto.SequentialSquaring(x, N)
-			operations++
-		}
-	}
-
-	elapsed := time.Since(start)
-	return operations, elapsed
 }

@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"cryptotimed/src/crypto"
-	"cryptotimed/src/types"
-	"cryptotimed/src/utils"
+	"cryptotimed/src/operations"
 )
 
 // EncryptCommand handles the encrypt subcommand
@@ -45,70 +43,31 @@ func EncryptCommand(args []string) error {
 		return fmt.Errorf("--work is required and must be > 0")
 	}
 
-	// Parse key input
-	userKeyRaw, err := utils.ParseKeyInput(*keyInput)
-	if err != nil {
-		return fmt.Errorf("failed to parse key input: %v", err)
+	// Prepare options for the operation
+	opts := operations.EncryptOptions{
+		InputFile:  *inputFile,
+		WorkFactor: *workFactor,
+		KeyInput:   *keyInput,
 	}
 
-	// Read input file
+	// Display progress messages
 	fmt.Printf("Reading input file: %s\n", *inputFile)
-	plaintext, err := utils.ReadFile(*inputFile)
-	if err != nil {
-		return fmt.Errorf("failed to read input file: %v", err)
-	}
-
-	// Generate time-lock puzzle
 	fmt.Printf("Generating time-lock puzzle (work factor: %d)...\n", *workFactor)
-	puzzle, _, err := crypto.GeneratePuzzle(*workFactor, userKeyRaw)
+
+	// Perform the encryption operation
+	result, err := operations.EncryptFile(opts)
 	if err != nil {
-		return fmt.Errorf("failed to generate puzzle: %v", err)
+		return err
 	}
 
-	// Derive encryption key directly from puzzle target
-	encryptionKey := crypto.DerivePuzzleKey(puzzle.Target)
-
-	// Determine if password was used (affects file format)
-	var keyRequired uint8
-	if len(userKeyRaw) > 0 {
-		keyRequired = 1
-	} else {
-		keyRequired = 0
-	}
-
-	// Encrypt the data directly with the puzzle-derived key
-	fmt.Printf("Encrypting data (%d bytes)...\n", len(plaintext))
-	encryptedData, err := crypto.EncryptData(encryptionKey, plaintext)
-	if err != nil {
-		return fmt.Errorf("failed to encrypt data: %v", err)
-	}
-
-	// Convert puzzle to byte arrays for storage
-	nBytes, gBytes := utils.PuzzleToBytes(puzzle)
-
-	// Create encrypted file structure
-	ef := &types.EncryptedFile{
-		Version:     types.CurrentVersion,
-		WorkFactor:  *workFactor,
-		ModulusN:    nBytes,
-		BaseG:       gBytes,
-		KeyRequired: keyRequired,
-		Salt:        puzzle.Salt,
-		Data:        encryptedData,
-	}
-
-	// Write encrypted file
-	outputFile := *inputFile + ".locked"
-	fmt.Printf("Writing encrypted file: %s\n", outputFile)
-	if err := utils.WriteEncryptedFile(outputFile, ef); err != nil {
-		return fmt.Errorf("failed to write encrypted file: %v", err)
-	}
-
+	// Display results
+	fmt.Printf("Encrypting data (%d bytes)...\n", result.PlaintextSize)
+	fmt.Printf("Writing encrypted file: %s\n", result.OutputFile)
 	fmt.Printf("Encryption complete!\n")
-	fmt.Printf("Input file: %s (%d bytes)\n", *inputFile, len(plaintext))
-	fmt.Printf("Output file: %s (%d bytes)\n", outputFile, types.HeaderSize+8+len(encryptedData))
-	fmt.Printf("Work factor: %d sequential squarings\n", *workFactor)
-	if keyRequired == 1 {
+	fmt.Printf("Input file: %s (%d bytes)\n", result.InputFile, result.PlaintextSize)
+	fmt.Printf("Output file: %s (%d bytes)\n", result.OutputFile, result.EncryptedSize)
+	fmt.Printf("Work factor: %d sequential squarings\n", result.WorkFactor)
+	if result.KeyRequired {
 		fmt.Printf("Key required: Yes (puzzle + passphrase)\n")
 	} else {
 		fmt.Printf("Key required: No (puzzle only)\n")

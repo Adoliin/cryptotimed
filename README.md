@@ -130,7 +130,8 @@ go test ./src/... -v
 ## Architecture
 
 - `src/main.go` - CLI entry point
-- `src/cmd/` - Command implementations (encrypt, decrypt, benchmark)
+- `src/cmd/` - Command-line interface (argument parsing, validation, help)
+- `src/operations/` - Business logic for core operations (encrypt, decrypt, benchmark)
 - `src/crypto/` - Cryptographic primitives (TLP, ChaCha20-Poly1305)
 - `src/utils/` - File I/O and progress utilities
 - `src/types/` - Data structures
