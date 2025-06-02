@@ -75,6 +75,21 @@ func DecryptCommand(args []string) error {
 	// Extract puzzle from encrypted file
 	puzzle := utils.PuzzleFromEncryptedFile(ef)
 
+	// If this file uses password-based G derivation, we need to derive G from the password
+	if ef.KeyRequired == 1 && ef.KdfID == 1 { // Argon2id
+		if len(userKeyRaw) == 0 {
+			return fmt.Errorf("password required for this file")
+		}
+		
+		// Derive G from password + salt
+		kdfParams := crypto.DecodeKdfParams(ef.KdfParams)
+		derivedG, err := crypto.DeriveBaseFromPassword(userKeyRaw, ef.Salt, kdfParams, puzzle.N)
+		if err != nil {
+			return fmt.Errorf("failed to derive puzzle base from password: %v", err)
+		}
+		puzzle.G = derivedG
+	}
+
 	fmt.Printf("Solving time-lock puzzle (%d sequential squarings)...\n", ef.WorkFactor)
 
 	// Create progress bar
@@ -88,20 +103,14 @@ func DecryptCommand(args []string) error {
 
 	fmt.Printf("Puzzle solved!\n")
 
-	// Derive final decryption key
-	finalKey, _ := crypto.DeriveFinalKey(target, userKeyRaw)
+	// Derive decryption key directly from puzzle target
+	decryptionKey := crypto.DerivePuzzleKey(target)
 
-	// Decrypt the data key
-	dataKey, err := crypto.DecryptKey(finalKey, ef.EncKey, ef.Nonce)
-	if err != nil {
-		return fmt.Errorf("failed to decrypt data key (wrong passphrase?): %v", err)
-	}
-
-	// Decrypt the data
+	// Decrypt the data directly
 	fmt.Printf("Decrypting data...\n")
-	plaintext, err := crypto.DecryptData(dataKey, ef.Data)
+	plaintext, err := crypto.DecryptData(decryptionKey, ef.Data)
 	if err != nil {
-		return fmt.Errorf("failed to decrypt data: %v", err)
+		return fmt.Errorf("failed to decrypt data (wrong passphrase?): %v", err)
 	}
 
 	// Write decrypted file

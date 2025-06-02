@@ -10,7 +10,7 @@ import (
 func TestGenerateAndSolvePuzzle(t *testing.T) {
 	const squarings = 20 // keep unit‑test quick
 
-	puzzle, priv, err := GeneratePuzzle(squarings)
+	puzzle, priv, err := GeneratePuzzle(squarings, nil) // No password for test
 	if err != nil {
 		t.Fatalf("GeneratePuzzle failed: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestProgressCallback(t *testing.T) {
 
 // TestZeroWorkFactor checks corner‑case T = 0.
 func TestZeroWorkFactor(t *testing.T) {
-	puzz, _, err := GeneratePuzzle(0)
+	puzz, _, err := GeneratePuzzle(0, nil) // No password for test
 	if err != nil {
 		t.Fatalf("GeneratePuzzle(T=0) failed: %v", err)
 	}

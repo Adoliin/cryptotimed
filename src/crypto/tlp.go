@@ -17,9 +17,12 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"encoding/binary"
 	"errors"
 	"io"
 	"math/big"
+
+	"golang.org/x/crypto/argon2"
 )
 
 const (
@@ -30,6 +33,22 @@ const (
 	// rsa2048Bytes is the length in bytes of a 2048‑bit modulus or element.
 	rsa2048Bytes = DefaultModulusBits / 8
 )
+
+// Argon2idParams holds the parameters for Argon2id KDF
+type Argon2idParams struct {
+	Memory      uint32 // Memory cost in KiB
+	Time        uint32 // Time cost (iterations)
+	Parallelism uint8  // Parallelism factor
+	KeyLen      uint32 // Output key length
+}
+
+// DefaultArgon2idParams provides conservative Argon2id parameters
+var DefaultArgon2idParams = Argon2idParams{
+	Memory:      64 * 1024, // 64 MiB
+	Time:        3,         // 3 iterations
+	Parallelism: 1,         // Single thread (sequential)
+	KeyLen:      32,        // 256-bit output
+}
 
 // Puzzle encapsulates all public information necessary to solve a time‑lock
 // puzzle.  All fields are public so that callers can marshal/unmarshal as they
@@ -60,20 +79,32 @@ const (
 
 type Puzzle struct {
 	N      *big.Int // RSA modulus
-	G      *big.Int // random base, gcd(G, N) = 1
+	G      *big.Int // base, either random or password-derived, gcd(G, N) = 1
 	T      uint64   // number of sequential squarings
 	Target *big.Int // G^{2^T} mod N (the solution)
+	
+	// Password integration fields (only used when password is provided)
+	Salt      [16]byte       // Random salt for password-based G derivation
+	KdfID     uint8          // KDF identifier (0=none, 1=Argon2id)
+	KdfParams Argon2idParams // KDF parameters
 }
 
 // GeneratePuzzle creates a new RSA trapdoor time‑lock puzzle that requires ~T
 // modular squarings to solve without knowledge of φ(N).
 //
-//	t     – number of sequential squarings required of the solver.
+//	t        – number of sequential squarings required of the solver.
+//	password – optional password to integrate into the puzzle base G.
+//	           If empty, G is chosen randomly (legacy mode).
+//	           If provided, G is derived from password+salt using Argon2id.
 //
 // The function returns the public puzzle and, separately, the private key (so
 // that callers _may_ re‑use N or its factors if they wish).  Most applications
 // will throw the private key away immediately.
-func GeneratePuzzle(t uint64) (Puzzle, *rsa.PrivateKey, error) {
+//
+// When a password is provided, each wrong password guess forces the attacker
+// to recompute the full sequential squaring chain from scratch, making offline
+// dictionary attacks scale linearly with both password space and time-lock work.
+func GeneratePuzzle(t uint64, password []byte) (Puzzle, *rsa.PrivateKey, error) {
 	bits := DefaultModulusBits
 	randR := rand.Reader
 	if bits < 1024 {
@@ -98,19 +129,45 @@ func GeneratePuzzle(t uint64) (Puzzle, *rsa.PrivateKey, error) {
 	qMinus1 := new(big.Int).Sub(priv.Primes[1], big.NewInt(1))
 	phiN := new(big.Int).Mul(pMinus1, qMinus1)
 
-	// 3. Pick random base g∈[2,N‑2] with gcd(g,N)=1.
-	G, err := randomCoprime(randR, N)
-	if err != nil {
-		return Puzzle{}, nil, err
+	// 3. Initialize puzzle structure
+	puzzle := Puzzle{
+		N: N,
+		T: t,
 	}
 
-	// 4. Compute e = 2^T mod φ(N) efficiently (O(log T)).
+	// 4. Derive base G based on whether password is provided
+	var G *big.Int
+	if len(password) == 0 {
+		// Legacy mode: random base G
+		G, err = randomCoprime(randR, N)
+		if err != nil {
+			return Puzzle{}, nil, err
+		}
+		puzzle.KdfID = 0 // No KDF
+	} else {
+		// Password mode: derive G from password + salt
+		// Generate random salt
+		if _, err := rand.Read(puzzle.Salt[:]); err != nil {
+			return Puzzle{}, nil, err
+		}
+		
+		puzzle.KdfID = 1 // Argon2id
+		puzzle.KdfParams = DefaultArgon2idParams
+		
+		G, err = deriveBaseFromPassword(password, puzzle.Salt, puzzle.KdfParams, N)
+		if err != nil {
+			return Puzzle{}, nil, err
+		}
+	}
+	puzzle.G = G
+
+	// 5. Compute e = 2^T mod φ(N) efficiently (O(log T)).
 	e := powTwoMod(phiN, t)
 
-	// 5. target = g^e mod N – fast **because** we reduced the exponent modulo φ(N).
-	Target := new(big.Int).Exp(G, e, N)
+	// 6. target = g^e mod N – fast **because** we reduced the exponent modulo φ(N).
+	puzzle.Target = new(big.Int).Exp(G, e, N)
 
-	return Puzzle{N: N, G: G, T: t, Target: Target}, priv, nil
+	return puzzle, priv, nil
 }
 
 // SolvePuzzle computes g^{2^T} mod N by T sequential squarings, returning the
@@ -187,6 +244,73 @@ func powTwoMod(m *big.Int, t uint64) *big.Int {
 		base.Mod(base, m)
 	}
 	return res
+}
+
+// DeriveBaseFromPassword recreates the puzzle base G from a password and salt.
+// This function is used during decryption to reconstruct G for each password attempt.
+// Each wrong password will produce a different G, forcing a complete re-solve of the puzzle.
+func DeriveBaseFromPassword(password []byte, salt [16]byte, kdfParams Argon2idParams, N *big.Int) (*big.Int, error) {
+	return deriveBaseFromPassword(password, salt, kdfParams, N)
+}
+
+// deriveBaseFromPassword implements the core password-to-base derivation logic.
+// It uses Argon2id to derive a 256-bit value from password||salt, then maps it
+// to a valid base G in [2, N-2] with gcd(G, N) = 1.
+func deriveBaseFromPassword(password []byte, salt [16]byte, kdfParams Argon2idParams, N *big.Int) (*big.Int, error) {
+	// Use Argon2id to derive key material from password + salt
+	keyMaterial := argon2.IDKey(
+		password,
+		salt[:],
+		kdfParams.Time,
+		kdfParams.Memory,
+		kdfParams.Parallelism,
+		kdfParams.KeyLen,
+	)
+
+	// Convert the 256-bit key material to a big integer
+	keyInt := new(big.Int).SetBytes(keyMaterial)
+
+	// Map to range [2, N-2] and ensure gcd(G, N) = 1
+	two := big.NewInt(2)
+	nMinus3 := new(big.Int).Sub(N, big.NewInt(3)) // N - 3
+	
+	// g0 = (keyInt mod (N-3)) + 2, ensuring g0 ∈ [2, N-2]
+	g0 := new(big.Int).Mod(keyInt, nMinus3)
+	g0.Add(g0, two)
+
+	// Re-sample until gcd(g0, N) = 1
+	// This loop is expected to terminate quickly for RSA moduli
+	for {
+		if new(big.Int).GCD(nil, nil, g0, N).Cmp(big.NewInt(1)) == 0 {
+			return g0, nil
+		}
+		
+		// If gcd != 1, increment and try again
+		g0.Add(g0, big.NewInt(1))
+		if g0.Cmp(new(big.Int).Sub(N, big.NewInt(1))) >= 0 {
+			// Wrap around if we exceed N-2
+			g0.Set(two)
+		}
+	}
+}
+
+// EncodeKdfParams encodes Argon2id parameters into an 8-byte array for storage
+func EncodeKdfParams(params Argon2idParams) [8]byte {
+	var encoded [8]byte
+	binary.BigEndian.PutUint32(encoded[0:4], params.Memory)
+	binary.BigEndian.PutUint32(encoded[4:8], params.Time)
+	// Note: Parallelism and KeyLen are fixed in our implementation
+	return encoded
+}
+
+// DecodeKdfParams decodes Argon2id parameters from an 8-byte array
+func DecodeKdfParams(encoded [8]byte) Argon2idParams {
+	return Argon2idParams{
+		Memory:      binary.BigEndian.Uint32(encoded[0:4]),
+		Time:        binary.BigEndian.Uint32(encoded[4:8]),
+		Parallelism: DefaultArgon2idParams.Parallelism, // Fixed
+		KeyLen:      DefaultArgon2idParams.KeyLen,      // Fixed
+	}
 }
 
 // Helper/testing functions ////////////////////////////////////////////////////

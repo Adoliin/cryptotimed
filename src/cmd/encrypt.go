@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"crypto/rand"
 	"flag"
 	"fmt"
 	"os"
@@ -61,31 +60,27 @@ func EncryptCommand(args []string) error {
 
 	// Generate time-lock puzzle
 	fmt.Printf("Generating time-lock puzzle (work factor: %d)...\n", *workFactor)
-	puzzle, _, err := crypto.GeneratePuzzle(*workFactor)
+	puzzle, _, err := crypto.GeneratePuzzle(*workFactor, userKeyRaw)
 	if err != nil {
 		return fmt.Errorf("failed to generate puzzle: %v", err)
 	}
 
-	// Derive final encryption key
-	finalKey, keyRequired := crypto.DeriveFinalKey(puzzle.Target, userKeyRaw)
-
-	// Generate random symmetric key for data encryption
-	var dataKey [32]byte
-	if _, err := rand.Read(dataKey[:]); err != nil {
-		return fmt.Errorf("failed to generate data key: %v", err)
+	// Derive encryption key directly from puzzle target
+	encryptionKey := crypto.DerivePuzzleKey(puzzle.Target)
+	
+	// Determine if password was used (affects file format)
+	var keyRequired uint8
+	if len(userKeyRaw) > 0 {
+		keyRequired = 1
+	} else {
+		keyRequired = 0
 	}
 
-	// Encrypt the data with the random key
+	// Encrypt the data directly with the puzzle-derived key
 	fmt.Printf("Encrypting data (%d bytes)...\n", len(plaintext))
-	encryptedData, err := crypto.EncryptData(dataKey, plaintext)
+	encryptedData, err := crypto.EncryptData(encryptionKey, plaintext)
 	if err != nil {
 		return fmt.Errorf("failed to encrypt data: %v", err)
-	}
-
-	// Encrypt the data key with the final key
-	encKey, nonce, err := crypto.EncryptKey(finalKey, dataKey)
-	if err != nil {
-		return fmt.Errorf("failed to encrypt data key: %v", err)
 	}
 
 	// Convert puzzle to byte arrays for storage
@@ -98,8 +93,9 @@ func EncryptCommand(args []string) error {
 		ModulusN:    nBytes,
 		BaseG:       gBytes,
 		KeyRequired: keyRequired,
-		EncKey:      encKey,
-		Nonce:       nonce,
+		Salt:        puzzle.Salt,
+		KdfID:       puzzle.KdfID,
+		KdfParams:   crypto.EncodeKdfParams(puzzle.KdfParams),
 		Data:        encryptedData,
 	}
 

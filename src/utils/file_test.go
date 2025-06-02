@@ -24,6 +24,7 @@ func TestWriteReadEncryptedFile(t *testing.T) {
 		Version:     types.CurrentVersion,
 		WorkFactor:  12345,
 		KeyRequired: 1,
+		KdfID:       types.KdfArgon2id,
 		Data:        []byte("test encrypted data"),
 	}
 
@@ -32,11 +33,11 @@ func TestWriteReadEncryptedFile(t *testing.T) {
 		ef.ModulusN[i] = byte(i % 256)
 		ef.BaseG[i] = byte((i + 100) % 256)
 	}
-	for i := 0; i < 48; i++ {
-		ef.EncKey[i] = byte((i + 50) % 256)
+	for i := 0; i < 16; i++ {
+		ef.Salt[i] = byte((i + 25) % 256)
 	}
-	for i := 0; i < 12; i++ {
-		ef.Nonce[i] = byte((i + 200) % 256)
+	for i := 0; i < 8; i++ {
+		ef.KdfParams[i] = byte((i + 75) % 256)
 	}
 
 	// Write to file
@@ -62,17 +63,20 @@ func TestWriteReadEncryptedFile(t *testing.T) {
 	if ef2.KeyRequired != ef.KeyRequired {
 		t.Errorf("KeyRequired mismatch: got %d, want %d", ef2.KeyRequired, ef.KeyRequired)
 	}
+	if ef2.Salt != ef.Salt {
+		t.Errorf("Salt mismatch")
+	}
+	if ef2.KdfID != ef.KdfID {
+		t.Errorf("KdfID mismatch: got %d, want %d", ef2.KdfID, ef.KdfID)
+	}
+	if ef2.KdfParams != ef.KdfParams {
+		t.Errorf("KdfParams mismatch")
+	}
 	if ef2.ModulusN != ef.ModulusN {
 		t.Errorf("ModulusN mismatch")
 	}
 	if ef2.BaseG != ef.BaseG {
 		t.Errorf("BaseG mismatch")
-	}
-	if ef2.EncKey != ef.EncKey {
-		t.Errorf("EncKey mismatch")
-	}
-	if ef2.Nonce != ef.Nonce {
-		t.Errorf("Nonce mismatch")
 	}
 	if !bytes.Equal(ef2.Data, ef.Data) {
 		t.Errorf("Data mismatch")
@@ -81,7 +85,7 @@ func TestWriteReadEncryptedFile(t *testing.T) {
 
 func TestPuzzleFromEncryptedFile(t *testing.T) {
 	// Generate a real puzzle for testing
-	originalPuzzle, _, err := crypto.GeneratePuzzle(100)
+	originalPuzzle, _, err := crypto.GeneratePuzzle(100, nil) // No password for test
 	if err != nil {
 		t.Fatalf("Failed to generate puzzle: %v", err)
 	}

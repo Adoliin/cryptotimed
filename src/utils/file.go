@@ -3,7 +3,6 @@ package utils
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"io"
 	"math/big"
 	"os"
@@ -42,10 +41,13 @@ func WriteEncryptedFile(filename string, ef *types.EncryptedFile) error {
 	if err := binary.Write(&buf, binary.LittleEndian, ef.KeyRequired); err != nil {
 		return err
 	}
-	if err := binary.Write(&buf, binary.LittleEndian, ef.EncKey); err != nil {
+	if err := binary.Write(&buf, binary.LittleEndian, ef.Salt); err != nil {
 		return err
 	}
-	if err := binary.Write(&buf, binary.LittleEndian, ef.Nonce); err != nil {
+	if err := binary.Write(&buf, binary.LittleEndian, ef.KdfID); err != nil {
+		return err
+	}
+	if err := binary.Write(&buf, binary.LittleEndian, ef.KdfParams); err != nil {
 		return err
 	}
 
@@ -68,17 +70,15 @@ func ReadEncryptedFile(filename string) (*types.EncryptedFile, error) {
 		return nil, err
 	}
 
-	if len(data) < types.HeaderSize+8 { // +8 for data length field
-		return nil, errors.New("file too short to be valid encrypted file")
-	}
-
 	buf := bytes.NewReader(data)
 	ef := &types.EncryptedFile{}
 
-	// Read header fields
+	// Read version first to determine file format
 	if err := binary.Read(buf, binary.LittleEndian, &ef.Version); err != nil {
 		return nil, err
 	}
+
+	// Read common fields
 	if err := binary.Read(buf, binary.LittleEndian, &ef.WorkFactor); err != nil {
 		return nil, err
 	}
@@ -91,11 +91,34 @@ func ReadEncryptedFile(filename string) (*types.EncryptedFile, error) {
 	if err := binary.Read(buf, binary.LittleEndian, &ef.KeyRequired); err != nil {
 		return nil, err
 	}
-	if err := binary.Read(buf, binary.LittleEndian, &ef.EncKey); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(buf, binary.LittleEndian, &ef.Nonce); err != nil {
-		return nil, err
+
+	// Handle version-specific fields
+	if ef.Version >= 2 {
+		// Version 2+: includes salt and KDF parameters, no separate EncKey/Nonce
+		if err := binary.Read(buf, binary.LittleEndian, &ef.Salt); err != nil {
+			return nil, err
+		}
+		if err := binary.Read(buf, binary.LittleEndian, &ef.KdfID); err != nil {
+			return nil, err
+		}
+		if err := binary.Read(buf, binary.LittleEndian, &ef.KdfParams); err != nil {
+			return nil, err
+		}
+	} else {
+		// Version 1: legacy format with EncKey/Nonce fields
+		// Initialize with zero values (KdfID=0 means no KDF)
+		ef.KdfID = types.KdfNone
+		
+		// Skip the old EncKey and Nonce fields (48 + 12 = 60 bytes)
+		var encKey [48]byte
+		var nonce [12]byte
+		if err := binary.Read(buf, binary.LittleEndian, &encKey); err != nil {
+			return nil, err
+		}
+		if err := binary.Read(buf, binary.LittleEndian, &nonce); err != nil {
+			return nil, err
+		}
+		// Note: For Version 1 files, we'll need special handling in decrypt
 	}
 
 	// Read data length
@@ -118,12 +141,21 @@ func PuzzleFromEncryptedFile(ef *types.EncryptedFile) crypto.Puzzle {
 	N := new(big.Int).SetBytes(ef.ModulusN[:])
 	G := new(big.Int).SetBytes(ef.BaseG[:])
 
-	return crypto.Puzzle{
+	puzzle := crypto.Puzzle{
 		N: N,
 		G: G,
 		T: ef.WorkFactor,
 		// Target will be computed by SolvePuzzle
+		Salt:  ef.Salt,
+		KdfID: ef.KdfID,
 	}
+
+	// Decode KDF parameters if present
+	if ef.KdfID == types.KdfArgon2id {
+		puzzle.KdfParams = crypto.DecodeKdfParams(ef.KdfParams)
+	}
+
+	return puzzle
 }
 
 // PuzzleToBytes converts puzzle components to byte arrays for storage

@@ -38,8 +38,8 @@ func BenchmarkCommand(args []string) error {
 	fmt.Printf("Duration per sample: %v\n", *duration)
 	fmt.Printf("Number of samples: %d\n\n", *samples)
 
-	// Generate a test puzzle to get realistic RSA modulus
-	testPuzzle, _, err := crypto.GeneratePuzzle(1)
+	// Generate a test puzzle to get realistic RSA modulus (no password for benchmark)
+	testPuzzle, _, err := crypto.GeneratePuzzle(1, nil)
 	if err != nil {
 		return fmt.Errorf("failed to generate test puzzle: %v", err)
 	}
