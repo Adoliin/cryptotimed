@@ -67,7 +67,7 @@ func EncryptCommand(args []string) error {
 
 	// Derive encryption key directly from puzzle target
 	encryptionKey := crypto.DerivePuzzleKey(puzzle.Target)
-	
+
 	// Determine if password was used (affects file format)
 	var keyRequired uint8
 	if len(userKeyRaw) > 0 {
@@ -94,8 +94,6 @@ func EncryptCommand(args []string) error {
 		BaseG:       gBytes,
 		KeyRequired: keyRequired,
 		Salt:        puzzle.Salt,
-		KdfID:       puzzle.KdfID,
-		KdfParams:   crypto.EncodeKdfParams(puzzle.KdfParams),
 		Data:        encryptedData,
 	}
 

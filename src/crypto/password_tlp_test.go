@@ -118,32 +118,6 @@ func TestPasswordVsNonPasswordPuzzles(t *testing.T) {
 	}
 }
 
-// TestKdfParamsEncoding tests that KDF parameters are encoded/decoded correctly
-func TestKdfParamsEncoding(t *testing.T) {
-	params := Argon2idParams{
-		Memory:      65536,
-		Time:        4,
-		Parallelism: 1,
-		KeyLen:      32,
-	}
-
-	encoded := EncodeKdfParams(params)
-	decoded := DecodeKdfParams(encoded)
-
-	if decoded.Memory != params.Memory {
-		t.Errorf("Memory mismatch: got %d, want %d", decoded.Memory, params.Memory)
-	}
-	if decoded.Time != params.Time {
-		t.Errorf("Time mismatch: got %d, want %d", decoded.Time, params.Time)
-	}
-	if decoded.Parallelism != params.Parallelism {
-		t.Errorf("Parallelism mismatch: got %d, want %d", decoded.Parallelism, params.Parallelism)
-	}
-	if decoded.KeyLen != params.KeyLen {
-		t.Errorf("KeyLen mismatch: got %d, want %d", decoded.KeyLen, params.KeyLen)
-	}
-}
-
 // TestPasswordDeterminism tests that same password+salt always produces same G
 func TestPasswordDeterminism(t *testing.T) {
 	password := []byte("deterministic test")

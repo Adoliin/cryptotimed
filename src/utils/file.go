@@ -44,12 +44,6 @@ func WriteEncryptedFile(filename string, ef *types.EncryptedFile) error {
 	if err := binary.Write(&buf, binary.LittleEndian, ef.Salt); err != nil {
 		return err
 	}
-	if err := binary.Write(&buf, binary.LittleEndian, ef.KdfID); err != nil {
-		return err
-	}
-	if err := binary.Write(&buf, binary.LittleEndian, ef.KdfParams); err != nil {
-		return err
-	}
 
 	// Write data length and data
 	dataLen := uint64(len(ef.Data))
@@ -94,21 +88,12 @@ func ReadEncryptedFile(filename string) (*types.EncryptedFile, error) {
 
 	// Handle version-specific fields
 	if ef.Version >= 2 {
-		// Version 2+: includes salt and KDF parameters, no separate EncKey/Nonce
+		// Version 2+: includes salt, KDF parameters are app-defined based on version
 		if err := binary.Read(buf, binary.LittleEndian, &ef.Salt); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(buf, binary.LittleEndian, &ef.KdfID); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(buf, binary.LittleEndian, &ef.KdfParams); err != nil {
 			return nil, err
 		}
 	} else {
 		// Version 1: legacy format with EncKey/Nonce fields
-		// Initialize with zero values (KdfID=0 means no KDF)
-		ef.KdfID = types.KdfNone
-		
 		// Skip the old EncKey and Nonce fields (48 + 12 = 60 bytes)
 		var encKey [48]byte
 		var nonce [12]byte
@@ -146,13 +131,17 @@ func PuzzleFromEncryptedFile(ef *types.EncryptedFile) crypto.Puzzle {
 		G: G,
 		T: ef.WorkFactor,
 		// Target will be computed by SolvePuzzle
-		Salt:  ef.Salt,
-		KdfID: ef.KdfID,
+		Salt: ef.Salt,
 	}
 
-	// Decode KDF parameters if present
-	if ef.KdfID == types.KdfArgon2id {
-		puzzle.KdfParams = crypto.DecodeKdfParams(ef.KdfParams)
+	// Set KDF parameters based on file version and KeyRequired flag
+	if ef.Version >= 2 && ef.KeyRequired == 1 {
+		// Version 2+: Use Argon2id with app-defined parameters
+		puzzle.KdfID = 1 // Argon2id
+		puzzle.KdfParams = crypto.DefaultArgon2idParams
+	} else {
+		// Version 1 or puzzle-only: No KDF
+		puzzle.KdfID = 0 // No KDF
 	}
 
 	return puzzle

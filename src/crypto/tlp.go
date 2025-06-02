@@ -17,7 +17,6 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"io"
 	"math/big"
@@ -82,7 +81,7 @@ type Puzzle struct {
 	G      *big.Int // base, either random or password-derived, gcd(G, N) = 1
 	T      uint64   // number of sequential squarings
 	Target *big.Int // G^{2^T} mod N (the solution)
-	
+
 	// Password integration fields (only used when password is provided)
 	Salt      [16]byte       // Random salt for password-based G derivation
 	KdfID     uint8          // KDF identifier (0=none, 1=Argon2id)
@@ -150,10 +149,10 @@ func GeneratePuzzle(t uint64, password []byte) (Puzzle, *rsa.PrivateKey, error) 
 		if _, err := rand.Read(puzzle.Salt[:]); err != nil {
 			return Puzzle{}, nil, err
 		}
-		
+
 		puzzle.KdfID = 1 // Argon2id
 		puzzle.KdfParams = DefaultArgon2idParams
-		
+
 		G, err = deriveBaseFromPassword(password, puzzle.Salt, puzzle.KdfParams, N)
 		if err != nil {
 			return Puzzle{}, nil, err
@@ -273,7 +272,7 @@ func deriveBaseFromPassword(password []byte, salt [16]byte, kdfParams Argon2idPa
 	// Map to range [2, N-2] and ensure gcd(G, N) = 1
 	two := big.NewInt(2)
 	nMinus3 := new(big.Int).Sub(N, big.NewInt(3)) // N - 3
-	
+
 	// g0 = (keyInt mod (N-3)) + 2, ensuring g0 ∈ [2, N-2]
 	g0 := new(big.Int).Mod(keyInt, nMinus3)
 	g0.Add(g0, two)
@@ -284,32 +283,13 @@ func deriveBaseFromPassword(password []byte, salt [16]byte, kdfParams Argon2idPa
 		if new(big.Int).GCD(nil, nil, g0, N).Cmp(big.NewInt(1)) == 0 {
 			return g0, nil
 		}
-		
+
 		// If gcd != 1, increment and try again
 		g0.Add(g0, big.NewInt(1))
 		if g0.Cmp(new(big.Int).Sub(N, big.NewInt(1))) >= 0 {
 			// Wrap around if we exceed N-2
 			g0.Set(two)
 		}
-	}
-}
-
-// EncodeKdfParams encodes Argon2id parameters into an 8-byte array for storage
-func EncodeKdfParams(params Argon2idParams) [8]byte {
-	var encoded [8]byte
-	binary.BigEndian.PutUint32(encoded[0:4], params.Memory)
-	binary.BigEndian.PutUint32(encoded[4:8], params.Time)
-	// Note: Parallelism and KeyLen are fixed in our implementation
-	return encoded
-}
-
-// DecodeKdfParams decodes Argon2id parameters from an 8-byte array
-func DecodeKdfParams(encoded [8]byte) Argon2idParams {
-	return Argon2idParams{
-		Memory:      binary.BigEndian.Uint32(encoded[0:4]),
-		Time:        binary.BigEndian.Uint32(encoded[4:8]),
-		Parallelism: DefaultArgon2idParams.Parallelism, // Fixed
-		KeyLen:      DefaultArgon2idParams.KeyLen,      // Fixed
 	}
 }
 

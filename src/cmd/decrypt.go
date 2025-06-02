@@ -76,14 +76,13 @@ func DecryptCommand(args []string) error {
 	puzzle := utils.PuzzleFromEncryptedFile(ef)
 
 	// If this file uses password-based G derivation, we need to derive G from the password
-	if ef.KeyRequired == 1 && ef.KdfID == 1 { // Argon2id
+	if ef.Version >= 2 && ef.KeyRequired == 1 {
 		if len(userKeyRaw) == 0 {
 			return fmt.Errorf("password required for this file")
 		}
-		
-		// Derive G from password + salt
-		kdfParams := crypto.DecodeKdfParams(ef.KdfParams)
-		derivedG, err := crypto.DeriveBaseFromPassword(userKeyRaw, ef.Salt, kdfParams, puzzle.N)
+
+		// Derive G from password + salt using app-defined KDF parameters
+		derivedG, err := crypto.DeriveBaseFromPassword(userKeyRaw, ef.Salt, puzzle.KdfParams, puzzle.N)
 		if err != nil {
 			return fmt.Errorf("failed to derive puzzle base from password: %v", err)
 		}
