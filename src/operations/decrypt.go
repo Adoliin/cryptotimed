@@ -63,7 +63,7 @@ func DecryptFile(opts DecryptOptions, progressCallback ProgressCallback) (*Decry
 	puzzle := utils.PuzzleFromEncryptedFile(ef)
 
 	// If this file uses password-based G derivation, we need to derive G from the password
-	if ef.Version >= 2 && ef.KeyRequired == 1 {
+	if ef.KeyRequired == 1 {
 		if len(userKeyRaw) == 0 {
 			return nil, fmt.Errorf("password required for this file")
 		}

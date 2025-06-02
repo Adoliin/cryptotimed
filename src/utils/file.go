@@ -86,24 +86,8 @@ func ReadEncryptedFile(filename string) (*types.EncryptedFile, error) {
 		return nil, err
 	}
 
-	// Handle version-specific fields
-	if ef.Version >= 2 {
-		// Version 2+: includes salt, KDF parameters are app-defined based on version
-		if err := binary.Read(buf, binary.LittleEndian, &ef.Salt); err != nil {
-			return nil, err
-		}
-	} else {
-		// Version 1: legacy format with EncKey/Nonce fields
-		// Skip the old EncKey and Nonce fields (48 + 12 = 60 bytes)
-		var encKey [48]byte
-		var nonce [12]byte
-		if err := binary.Read(buf, binary.LittleEndian, &encKey); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(buf, binary.LittleEndian, &nonce); err != nil {
-			return nil, err
-		}
-		// Note: For Version 1 files, we'll need special handling in decrypt
+	if err := binary.Read(buf, binary.LittleEndian, &ef.Salt); err != nil {
+		return nil, err
 	}
 
 	// Read data length
@@ -135,13 +119,9 @@ func PuzzleFromEncryptedFile(ef *types.EncryptedFile) crypto.Puzzle {
 	}
 
 	// Set KDF parameters based on file version and KeyRequired flag
-	if ef.Version >= 2 && ef.KeyRequired == 1 {
-		// Version 2+: Use Argon2id with app-defined parameters
+	if ef.KeyRequired == 1 {
 		puzzle.KdfID = 1 // Argon2id
 		puzzle.KdfParams = crypto.DefaultArgon2idParams
-	} else {
-		// Version 1 or puzzle-only: No KDF
-		puzzle.KdfID = 0 // No KDF
 	}
 
 	return puzzle

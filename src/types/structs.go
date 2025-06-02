@@ -16,7 +16,7 @@ type EncryptedFile struct {
 
 const (
 	// CurrentVersion is the current file format version
-	CurrentVersion = 2
+	CurrentVersion = 1
 
 	// HeaderSize is the size of the fixed header in bytes
 	// 4 (Version) + 8 (WorkFactor) + 256 (ModulusN) + 256 (BaseG) + 1 (KeyRequired) + 16 (Salt)
