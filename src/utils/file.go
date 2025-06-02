@@ -177,3 +177,8 @@ func ParseKeyInput(keyInput string) ([]byte, error) {
 	// Direct string input - convert to bytes
 	return []byte(keyInput), nil
 }
+
+// GetFileInfo returns file information
+func GetFileInfo(filename string) (os.FileInfo, error) {
+	return os.Stat(filename)
+}

@@ -24,6 +24,8 @@ func main() {
 		err = cmd.DecryptCommand(args)
 	case "benchmark":
 		err = cmd.BenchmarkCommand(args)
+	case "check":
+		err = cmd.CheckCommand(args)
 	case "help", "-h", "--help":
 		printUsage()
 		return
@@ -46,6 +48,7 @@ func printUsage() {
 	fmt.Printf("Commands:\n")
 	fmt.Printf("  encrypt     Encrypt a file with time-lock puzzle\n")
 	fmt.Printf("  decrypt     Decrypt a time-locked file\n")
+	fmt.Printf("  check       Inspect an encrypted file and show metadata\n")
 	fmt.Printf("  benchmark   Benchmark modular squaring performance\n")
 	fmt.Printf("  help        Show this help message\n\n")
 	fmt.Printf("Examples:\n")
@@ -53,6 +56,7 @@ func printUsage() {
 	fmt.Printf("  %s encrypt --input document.pdf --work 81000000 --key \"passphrase\"\n", os.Args[0])
 	fmt.Printf("  %s decrypt --input document.pdf.locked\n", os.Args[0])
 	fmt.Printf("  %s decrypt --input document.pdf.locked --key \"passphrase\"\n", os.Args[0])
+	fmt.Printf("  %s check --input document.pdf.locked\n", os.Args[0])
 	fmt.Printf("  %s benchmark\n", os.Args[0])
 	fmt.Printf("\nFor detailed help on a command, use:\n")
 	fmt.Printf("  %s <command> --help\n", os.Args[0])
